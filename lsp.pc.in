@@ -1,0 +1,12 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: lib@PROJECT_NAME@
+Description: A modern C++ Language Server framework
+URL: https://github.com/leon-bckl/lsp-framework
+Version: @LSP_VERSION@
+CFlags: -I${includedir}
+Libs: -L${libdir} -l@PROJECT_NAME@
+
