@@ -368,7 +368,15 @@ void fromJson(json::Any&& json, std::vector<T>& value)
 	value.reserve(array.size());
 
 	for(auto&& e : array)
-		fromJson(std::move(e), value.emplace_back());
+	{
+		try
+		{
+			fromJson(std::move(e), value.emplace_back());
+		}
+		catch (json::TypeError&)
+		{
+		}
+	}
 }
 
 template<typename T>
