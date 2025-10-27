@@ -368,7 +368,7 @@ std::string Uri::encode(std::string_view decoded, std::string_view exclude)
 	std::string encoded;
 	encoded.reserve(decoded.size());
 
-	for(const char c : decoded)
+	for(const unsigned char c : decoded)
 	{
 		if(exclude.find(c) != std::string_view::npos ||
 		   std::isalnum(static_cast<unsigned char>(c)) ||
