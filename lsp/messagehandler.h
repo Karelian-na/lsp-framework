@@ -36,6 +36,7 @@ public:
 		using Result = json::Any;
 	};
 
+	using GuardMessageCallback         = std::function<std::variant<bool, AsyncRequestResult<GenericMessage>>(lsp::jsonrpc::Request& request)>;
 	using GenericMessageCallback       = std::function<json::Any(json::Any&&)>;
 	using GenericAsyncMessageCallback  = std::function<AsyncRequestResult<GenericMessage>(json::Any&&)>;
 	using GenericResponseCallback      = std::function<void(json::Any&&)>;
@@ -59,6 +60,12 @@ public:
 
 	MessageHandler& add(std::string_view method, GenericMessageCallback callback);
 	MessageHandler& add(std::string_view method, GenericAsyncMessageCallback callback);
+
+	/*
+	 * Guard callback registration, will be called for any method
+	 */
+
+	MessageHandler& add(GuardMessageCallback&& callback);
 
 	void remove(std::string_view method);
 
@@ -111,6 +118,8 @@ private:
 	// General
 	Connection&                                      m_connection;
 	ThreadPool                                       m_threadPool;
+	// Guard message handler
+	GuardMessageCallback                             m_guardRequestHandler;
 	// Incoming requests
 	StrMap<std::string, HandlerWrapper>              m_requestHandlersByMethod;
 	std::mutex                                       m_requestHandlersMutex;

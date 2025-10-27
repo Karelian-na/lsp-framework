@@ -100,61 +100,98 @@ MessageHandler::OptionalResponse MessageHandler::processRequest(jsonrpc::Request
 	std::unique_lock lock{m_requestHandlersMutex};
 	OptionalResponse response;
 
-	if(const auto handlerIt = m_requestHandlersByMethod.find(request.method);
-	   handlerIt != m_requestHandlersByMethod.end() && handlerIt->second)
+	assert(!t_currentRequestId);
+	if(request.id.has_value())
+		t_currentRequestId = &request.id.value();
+	else
+		t_currentRequestId = &NullMessageId;
+
+	try
 	{
-		assert(!t_currentRequestId);
-		if(request.id.has_value())
-			t_currentRequestId = &request.id.value();
-		else
-			t_currentRequestId = &NullMessageId;
+		lock.unlock();
 
-		try
+		while (m_guardRequestHandler)
 		{
-			lock.unlock();
+			static json::Any nullParam = json::Null {};
+			std::variant handleRes = m_guardRequestHandler(request);
 
+			if (std::holds_alternative<bool>(handleRes))
+			{
+				break;
+			}
+
+			const auto isNotification = std::holds_alternative<std::nullptr_t>(currentRequestId());
+			auto future = std::move(std::get<AsyncRequestResult<GenericMessage>>(handleRes));
+
+			const auto& requestId = currentRequestId();
+			t_currentRequestId = nullptr;
+			if(allowAsync)
+			{
+				m_threadPool.addTask(
+					[this, future = std::move(future), isNotification = isNotification, requestId]() mutable
+					{
+						auto response = createResponseFromAsyncResult<GenericMessage>(requestId, future);
+
+						if(!isNotification)
+							sendResponse(std::move(response));
+					}
+				);
+				return std::nullopt;
+			}
+
+			auto result = future.get();
+
+			if(!isNotification)
+				return jsonrpc::createResponse(currentRequestId(), future.get());
+
+			return std::nullopt;
+		}
+
+		if(const auto handlerIt = m_requestHandlersByMethod.find(request.method);
+		handlerIt != m_requestHandlersByMethod.end() && handlerIt->second)
+		{
 			// Call handler for the method type and return optional response
 			response = handlerIt->second(
 				request.params.has_value() ? std::move(*request.params) : json::Null{},
 				allowAsync);
 		}
-		catch(const RequestError& e)
+		else
 		{
 			if(!request.isNotification())
-			{
-				response = jsonrpc::createErrorResponse(
-					*request.id, e.code(), e.what(), e.data());
-			}
+				response = jsonrpc::createErrorResponse(*request.id, Error::MethodNotFound, "Method not found");
 		}
-		catch(const json::TypeError& e)
-		{
-			if(!request.isNotification())
-			{
-				response = jsonrpc::createErrorResponse(
-					*request.id, Error::InvalidParams, e.what());
-			}
-		}
-		catch(const std::exception& e)
-		{
-			if(!request.isNotification())
-			{
-				response = jsonrpc::createErrorResponse(
-					*request.id, Error::InternalError, e.what());
-			}
-		}
-		catch(...)
-		{
-			t_currentRequestId = nullptr;
-			throw;
-		}
-
-		t_currentRequestId = nullptr;
 	}
-	else
+	catch(const RequestError& e)
 	{
 		if(!request.isNotification())
-			response = jsonrpc::createErrorResponse(*request.id, Error::MethodNotFound, "Method not found");
+		{
+			response = jsonrpc::createErrorResponse(
+				*request.id, e.code(), e.what(), e.data());
+		}
 	}
+	catch(const json::TypeError& e)
+	{
+		if(!request.isNotification())
+		{
+			response = jsonrpc::createErrorResponse(
+				*request.id, Error::InvalidParams, e.what());
+		}
+	}
+	catch(const std::exception& e)
+	{
+		if(!request.isNotification())
+		{
+			response = jsonrpc::createErrorResponse(
+				*request.id, Error::InternalError, e.what());
+		}
+	}
+	catch(...)
+	{
+		t_currentRequestId = nullptr;
+		throw;
+	}
+
+	t_currentRequestId = nullptr;
 
 	return response;
 }
@@ -256,6 +293,12 @@ MessageHandler& MessageHandler::add(std::string_view method, GenericAsyncMessage
 		}
 	);
 
+	return *this;
+}
+
+MessageHandler& MessageHandler::add(GuardMessageCallback&& callback)
+{
+	m_guardRequestHandler.swap(callback);
 	return *this;
 }
 
